@@ -1,4 +1,4 @@
-# maintenance-calendar
+# maintenance-calendar-for-aws
 > generate AWS maintenance calendar
 
 Generates an iCal calendar with information about scheduled maintenance events retrieved from AWS Personal Health Dashboard
@@ -98,7 +98,7 @@ Ronald Bow – [@rmkbow](https://twitter.com/rmkbow) – ronald.bow@hootsuite.co
 
 Distributed under the Apache license. See ``LICENSE`` for more information.
 
-[https://github.com/hootsuite/maintenance-calendar](https://github.com/hootsuite/maintenance-calendar)
+[https://github.com/hootsuite/maintenance-calendar-for-aws](https://github.com/hootsuite/maintenance-calendar-for-aws)
 
 ## Contributing
 
