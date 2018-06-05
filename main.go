@@ -227,6 +227,8 @@ func calendar_events(health_events []*health.Event) []ical.CalendarEvent {
 			event_type = "REBOOT"
 		case "AWS_EC2_INSTANCE_POWER_MAINTENANCE_SCHEDULED":
 			event_type = "REBOOT"
+		case "AWS_EC2_SYSTEM_REBOOT_MAINTENANCE_SCHEDULED":
+			event_type = "REBOOT"
 		case "AWS_EC2_INSTANCE_RETIREMENT_SCHEDULED":
 			event_type = "RETIREMENT"
 		case "AWS_EC2_INSTANCE_NETWORK_MAINTENANCE_SCHEDULED":
