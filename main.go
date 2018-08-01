@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/health"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/rds"
+	"github.com/aws/aws-sdk-go/service/elasticache"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/rmkbow/ical-go"
 	"net/url"
@@ -21,6 +22,7 @@ var aws_session *session.Session
 var health_connection *health.Health
 var ec2_connection map[string]*ec2.EC2
 var rds_connection map[string]*rds.RDS
+var elasticache_connection map[string]*elasticache.ElastiCache
 
 func error_check(e error) {
 	if e != nil {
@@ -29,6 +31,7 @@ func error_check(e error) {
 }
 
 func main() {
+	local := flag.Bool("local", false, "Do not Upload file to S3")
 	bucket_region := flag.String("bucket-region", "", "Region of the S3 bucket")
 	bucket := flag.String("bucket", "", "Name of the S3 bucket")
 	prefix := flag.String("prefix", "/", "Prefix of the S3 path (optional)")
@@ -36,13 +39,15 @@ func main() {
 	flag.Parse()
 	exit_flag := 0
 
-	if *bucket_region == "" {
-		exit_flag = 2
-		fmt.Println("--bucket-region REGION")
-	}
-	if *bucket == "" {
-		exit_flag = 2
-		fmt.Println("--bucket BUCKETNAME")
+	if *local == false {
+		if *bucket_region == "" {
+			exit_flag = 2
+			fmt.Println("--bucket-region REGION")
+		}
+		if *bucket == "" {
+			exit_flag = 2
+			fmt.Println("--bucket BUCKETNAME")
+		}
 	}
 	if *filename == "" {
 		exit_flag = 2
@@ -56,7 +61,9 @@ func main() {
 	initialize()
 	calendar := calendar(calendar_events(health_events()))
 	save_calendar_to_file(*filename, calendar)
-	upload_file(*bucket_region, *bucket, *prefix, *filename)
+	if *local == false {
+		upload_file(*bucket_region, *bucket, *prefix, *filename)
+	}
 }
 
 func initialize() {
@@ -64,6 +71,7 @@ func initialize() {
 	ec2_connection = make(map[string]*ec2.EC2)
 	health_connection = health.New(aws_session, &aws.Config{Region: aws.String("us-east-1")})
 	rds_connection = make(map[string]*rds.RDS)
+	elasticache_connection = make(map[string]*elasticache.ElastiCache)
 }
 
 func initialize_ec2_connection(region string) {
@@ -72,6 +80,10 @@ func initialize_ec2_connection(region string) {
 
 func initialize_rds_connection(region string) {
 	rds_connection[region] = rds.New(aws_session, &aws.Config{Region: aws.String(region)})
+}
+
+func initialize_elasticache_connection(region string) {
+	elasticache_connection[region] = elasticache.New(aws_session, &aws.Config{Region: aws.String(region)})
 }
 
 func health_events() []*health.Event {
@@ -169,6 +181,7 @@ func rds_maintenance_window(name string, region string) string {
 	describe_rds_cluster_filter := &rds.DescribeDBClustersInput{
 		DBClusterIdentifier: aws.String(name),
 	}
+
 	db_clusters,_ := rds_connection[region].DescribeDBClusters(describe_rds_cluster_filter)
 	for _,db_cluster := range db_clusters.DBClusters {
 		rds_maintenance_window = *db_cluster.PreferredMaintenanceWindow
@@ -187,6 +200,49 @@ func rds_maintenance_window(name string, region string) string {
 	}
 
 	return rds_maintenance_window
+}
+
+func elasticache_maintenance_window(name string, region string) string {
+	var elasticache_maintenance_window string
+
+	if elasticache_connection[region] == nil {
+		initialize_elasticache_connection(region)
+	}
+
+
+	elasticache_name_split_underscore := strings.Split(name, "_")
+	elasticache_name_underscore_trimmed := elasticache_name_split_underscore[:len(elasticache_name_split_underscore) - 2]
+	elasticache_name := strings.Join(elasticache_name_underscore_trimmed,"_")
+
+
+	elasticache_number_split_dash := strings.Split(name, "-")
+	elasticache_number_dash_trimmed := elasticache_number_split_dash[len(elasticache_number_split_dash) -1]
+
+	elasticache_number, _ := strconv.Atoi(elasticache_number_dash_trimmed)
+
+	describe_elasticache_replica_filter := &elasticache.DescribeReplicationGroupsInput{
+		ReplicationGroupId: aws.String(elasticache_name),
+	}
+
+	replica_sets,_ := elasticache_connection[region].DescribeReplicationGroups(describe_elasticache_replica_filter)
+
+	var elasticache_cluster_name string
+
+	for _,replica_set := range replica_sets.ReplicationGroups {
+		elasticache_cluster_name = *replica_set.MemberClusters[elasticache_number -1]
+	}
+
+	describe_elasticache_cluster_filter := &elasticache.DescribeCacheClustersInput{
+		CacheClusterId: aws.String(elasticache_cluster_name),
+	}
+
+	clusters,_ := elasticache_connection[region].DescribeCacheClusters(describe_elasticache_cluster_filter)
+
+
+	for _,cluster := range clusters.CacheClusters {
+		elasticache_maintenance_window = *cluster.PreferredMaintenanceWindow
+	}
+	return elasticache_maintenance_window
 }
 
 
@@ -250,9 +306,14 @@ func calendar_events(health_events []*health.Event) []ical.CalendarEvent {
 				calendar_event_summary = event_type + " " + ec2_instance_name(event_affected_resource, *health_event.Region) + " " + event_affected_resource
 			case "RDS":
 				calendar_event_summary = event_service + " " + event_affected_resource + " " + event_type
-				calendar_event_start_time_rds, calendar_event_end_time_rds := rds_maintenance_time(calendar_event_start_time, rds_maintenance_window(event_affected_resource, *health_event.Region))
+				calendar_event_start_time_rds, calendar_event_end_time_rds := maintenance_time(calendar_event_start_time, rds_maintenance_window(event_affected_resource, *health_event.Region))
 				calendar_event_start_time = &calendar_event_start_time_rds
 				calendar_event_end_time = &calendar_event_end_time_rds
+			case "ELASTICACHE":
+				calendar_event_summary = event_service + " " + event_affected_resource + " " + event_type
+				calendar_event_start_time_elasticache, calendar_event_end_time_elasticache := maintenance_time(calendar_event_start_time, elasticache_maintenance_window(event_affected_resource, *health_event.Region))
+				calendar_event_start_time = &calendar_event_start_time_elasticache
+				calendar_event_end_time = &calendar_event_end_time_elasticache
 			default:
 				calendar_event_summary = event_service + " " + event_affected_resource + " " + event_type
 			}
@@ -263,7 +324,8 @@ func calendar_events(health_events []*health.Event) []ical.CalendarEvent {
 	return calendar_events
 }
 
-func rds_maintenance_time(event_start *time.Time, maintenance_window string) (time.Time, time.Time) {
+func maintenance_time(event_start *time.Time, maintenance_window string) (time.Time, time.Time) {
+
 	//parsing maintenance time
 	//maintenance_window is in string format ddd:hh24:mi-ddd:hh24:mi
 	maintenance_window_start_end := strings.Split(maintenance_window, "-")
