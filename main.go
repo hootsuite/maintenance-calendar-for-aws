@@ -209,8 +209,8 @@ func elasticache_maintenance_window(name string, region string) string {
 		initialize_elasticache_connection(region)
 	}
 
-
-	elasticache_name_split_underscore := strings.Split(name, "_")
+        elasticache_name_normalized := strings.Replace(name, "/", "_", -1)
+	elasticache_name_split_underscore := strings.Split(elasticache_name_normalized, "_")
 	elasticache_name_underscore_trimmed := elasticache_name_split_underscore[:len(elasticache_name_split_underscore) - 2]
 	elasticache_name := strings.Join(elasticache_name_underscore_trimmed,"_")
 
